@@ -3,17 +3,6 @@
 <head>
     <style>
         body { margin: 0; }
-        .controls {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            color: white;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
         #bwVideo {
             position: fixed;
             bottom: 10px;
@@ -26,63 +15,68 @@
 </head>
 <body>
     <video id="bwVideo" autoplay playsinline></video>
-    <div class="controls">
-        <label>Displacement: <input type="range" id="scale" min="0" max="2" step="0.1" value="1"></label>
-        <label>Light Intensity: <input type="range" id="lightIntensity" min="0" max="5" step="0.1" value="1"></label>
-        <label>Light Distance: <input type="range" id="lightZ" min="-20" max="20" step="0.1" value="5"></label>
-        <button id="webcam">Start Webcam</button>
-    </div>
-
     <script type="module">
         import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const geometry = new THREE.PlaneGeometry(15, 15, 512, 512);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0x808080,
-            displacementScale: 1.0,
-            side: THREE.DoubleSide
+        // Large plane
+        const geometry = new THREE.PlaneGeometry(30, 30, 512, 512);
+        
+        // Fresnel material
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                displacementMap: { value: null },
+                fresnelBias: { value: 0.1 },
+                fresnelScale: { value: 1.0 },
+                fresnelPower: { value: 2.0 }
+            },
+            vertexShader: `
+                uniform sampler2D displacementMap;
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    vec4 displacement = texture2D(displacementMap, uv);
+                    vec3 newPosition = position + normal * displacement.r * 2.0;
+                    vec4 mvPosition = modelViewMatrix * vec4(newPosition, 1.0);
+                    gl_Position = projectionMatrix * mvPosition;
+                    vViewPosition = -mvPosition.xyz;
+                }
+            `,
+            fragmentShader: `
+                uniform float fresnelBias;
+                uniform float fresnelScale;
+                uniform float fresnelPower;
+                
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+
+                void main() {
+                    vec3 normal = normalize(vNormal);
+                    vec3 viewDir = normalize(vViewPosition);
+                    float fresnel = fresnelBias + fresnelScale * pow(1.0 + dot(viewDir, normal), fresnelPower);
+                    gl_FragColor = vec4(vec3(fresnel), 1.0);
+                }
+            `
         });
 
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
+        camera.position.z = 20;
 
-        const mainLight = new THREE.DirectionalLight(0xffffff, 1);
-        mainLight.position.set(0, 0, 5);
-        scene.add(mainLight);
-        scene.add(new THREE.AmbientLight(0x404040, 0.5));
-
-        camera.position.z = 15;
-        
-        document.getElementById('lightIntensity').oninput = (e) => {
-            mainLight.intensity = Number(e.target.value);
-        };
-
-        document.getElementById('lightZ').oninput = (e) => {
-            mainLight.position.z = Number(e.target.value);
-        };
-
-        document.getElementById('scale').oninput = (e) => {
-            material.displacementScale = Number(e.target.value);
-        };
-
-        document.getElementById('lightIntensity').oninput = (e) => {
-            light.intensity = Number(e.target.value);
-        };
-
-        document.getElementById('lightZ').oninput = (e) => {
-            light.position.z = Number(e.target.value);
-        };
-
-        document.getElementById('webcam').onclick = async () => {
+        // Start webcam and process frames
+        async function init() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             const video = document.getElementById('bwVideo');
             video.srcObject = stream;
             await video.play();
+
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             canvas.width = 512;
@@ -99,10 +93,10 @@
                 }
 
                 ctx.putImageData(imageData, 0, 0);
-                if (!material.displacementMap) {
-                    material.displacementMap = new THREE.CanvasTexture(canvas);
+                if (!material.uniforms.displacementMap.value) {
+                    material.uniforms.displacementMap.value = new THREE.CanvasTexture(canvas);
                 }
-                material.displacementMap.needsUpdate = true;
+                material.uniforms.displacementMap.value.needsUpdate = true;
             }
 
             function animate() {
@@ -110,16 +104,10 @@
                 processFrame();
                 renderer.render(scene, camera);
             }
-
             animate();
-        };
-
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
         }
 
-        animate();
+        init();
     </script>
 </body>
 </html>
