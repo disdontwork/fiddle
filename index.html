@@ -10,6 +10,9 @@
             background: rgba(0,0,0,0.7);
             padding: 10px;
             color: white;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
         #bwVideo {
             position: fixed;
@@ -27,13 +30,26 @@
             height: 120px;
             border: 2px solid white;
         }
+        label {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
     </style>
 </head>
 <body>
     <video id="bwVideo" autoplay playsinline></video>
     <canvas id="processedCanvas"></canvas>
     <div class="controls">
-        <label>Displacement: <input type="range" id="scale" min="0" max="2" step="0.1" value="1"></label>
+        <label>Displacement:
+            <input type="range" id="scale" min="0" max="2" step="0.1" value="1">
+        </label>
+        <label>Light Intensity:
+            <input type="range" id="lightIntensity" min="0" max="5" step="0.1" value="2">
+        </label>
+        <label>Light Distance:
+            <input type="range" id="lightDistance" min="100" max="2000" step="10" value="1000">
+        </label>
         <button id="webcam">Start Webcam</button>
     </div>
 
@@ -42,11 +58,13 @@
 
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(
-            window.innerWidth / -2, 
-            window.innerWidth / 2, 
-            window.innerHeight / 2, 
-            window.innerHeight / -2, 
-            1, 1000);
+            window.innerWidth / -2,
+            window.innerWidth / 2,
+            window.innerHeight / 2,
+            window.innerHeight / -2,
+            1, 2000
+        );
+
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
@@ -57,30 +75,40 @@
         processedCanvas.height = 512;
 
         const geometry = new THREE.PlaneGeometry(window.innerWidth, window.innerHeight, 512, 512);
-        const material = new THREE.MeshPhongMaterial({
+        const material = new THREE.MeshStandardMaterial({
             color: 0x808080,
             displacementScale: 1.0,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            metalness: 0.2,
+            roughness: 0.8
         });
 
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
 
-        // Dramatic lighting for relief effect
+        // Main light for relief effect
         const spotLight = new THREE.SpotLight(0xffffff, 2);
-        spotLight.position.set(-1000, 1000, 1000);
+        spotLight.position.set(0, 0, 1000);
         spotLight.angle = Math.PI / 4;
         spotLight.penumbra = 0.1;
         spotLight.decay = 2;
-        spotLight.distance = 4000;
-        
-        const light2 = new THREE.DirectionalLight(0xffffff, 0.5);
-        light2.position.set(1000, -1000, 1000);
+        spotLight.distance = 1000;
         scene.add(spotLight);
-        scene.add(light2);
-        scene.add(new THREE.AmbientLight(0x404040));
 
-        camera.position.z = 5;
+        // Ambient light for base visibility
+        scene.add(new THREE.AmbientLight(0x404040, 0.5));
+
+        camera.position.z = 1000;
+        plane.position.z = 0;
+
+        // Light controls
+        document.getElementById('lightIntensity').oninput = (e) => {
+            spotLight.intensity = Number(e.target.value);
+        };
+
+        document.getElementById('lightDistance').oninput = (e) => {
+            spotLight.position.z = Number(e.target.value);
+        };
 
         document.getElementById('scale').oninput = (e) => {
             material.displacementScale = Number(e.target.value);
@@ -117,6 +145,21 @@
 
             animate();
         };
+
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            camera.left = width / -2;
+            camera.right = width / 2;
+            camera.top = height / 2;
+            camera.bottom = height / -2;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(width, height);
+            
+            plane.geometry = new THREE.PlaneGeometry(width, height, 512, 512);
+        });
     </script>
 </body>
 </html>
