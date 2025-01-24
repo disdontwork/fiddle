@@ -3,7 +3,7 @@
 <head>
     <style>
         body { margin: 0; }
-        #controls {
+        .controls {
             position: fixed;
             top: 10px;
             left: 10px;
@@ -11,101 +11,66 @@
             padding: 10px;
             color: white;
         }
-        #debug {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: white;
-            padding: 5px;
-        }
     </style>
 </head>
 <body>
-    <div id="controls">
-        <button id="togglePattern">Toggle Pattern/Video</button><br>
-        <input type="range" id="displacement" min="0" max="5" step="0.1" value="1">
+    <div class="controls">
+        <label>Displacement: <input type="range" id="scale" min="0" max="2" step="0.1" value="1"></label>
+        <button id="webcam">Start Webcam</button>
     </div>
-    <div id="debug"></div>
 
     <script type="module">
-        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r159/three.module.js';
 
-        const debug = document.getElementById('debug');
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Create test pattern
+        // Test pattern
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         canvas.width = canvas.height = 256;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, 128, 256);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(128, 0, 128, 256);
         
-        const gradient = ctx.createLinearGradient(0, 0, 256, 256);
-        gradient.addColorStop(0, 'white');
-        gradient.addColorStop(1, 'black');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 256, 256);
+        const testTexture = new THREE.CanvasTexture(canvas);
 
-        const patternTexture = new THREE.CanvasTexture(canvas);
-        
-        // Setup geometry and material
         const geometry = new THREE.PlaneGeometry(5, 5, 128, 128);
-        const material = new THREE.MeshStandardMaterial({
+        const material = new THREE.MeshPhongMaterial({
             color: 0x808080,
-            displacementMap: patternTexture,
+            displacementMap: testTexture,
             displacementScale: 1.0,
-            displacementBias: -0.5,
-            side: THREE.DoubleSide,
+            side: THREE.DoubleSide
         });
 
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
 
-        // Lighting
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(5, 5, 5);
-        scene.add(directionalLight);
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(1, 1, 1);
+        scene.add(light);
         scene.add(new THREE.AmbientLight(0x404040));
 
         camera.position.z = 5;
 
-        // Video setup
-        let isVideo = false;
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.playsInline = true;
-
-        document.getElementById('togglePattern').onclick = async () => {
-            isVideo = !isVideo;
-            if (isVideo && !video.srcObject) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                    video.srcObject = stream;
-                    await video.play();
-                    material.displacementMap = new THREE.VideoTexture(video);
-                    debug.textContent = 'Using video texture';
-                } catch (err) {
-                    console.error(err);
-                    debug.textContent = 'Video error: ' + err.message;
-                }
-            } else {
-                material.displacementMap = patternTexture;
-                debug.textContent = 'Using pattern texture';
-            }
+        document.getElementById('scale').oninput = (e) => {
+            material.displacementScale = Number(e.target.value);
         };
 
-        document.getElementById('displacement').oninput = (e) => {
-            material.displacementScale = parseFloat(e.target.value);
-            debug.textContent = `Scale: ${material.displacementScale}`;
+        document.getElementById('webcam').onclick = async () => {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            await video.play();
+            material.displacementMap = new THREE.VideoTexture(video);
         };
 
         function animate() {
             requestAnimationFrame(animate);
-            if (material.displacementMap) {
-                material.displacementMap.needsUpdate = true;
-            }
             plane.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
