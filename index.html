@@ -3,7 +3,8 @@
 <head>
     <title>Realtime Webcam Displacement</title>
     <style>
-        body { margin: 0; overflow: hidden; }
+        body { margin: 0; }
+        canvas { display: block; }
         #controls {
             position: fixed;
             top: 10px;
@@ -12,146 +13,167 @@
             padding: 10px;
             color: white;
             font-family: Arial;
-            z-index: 100;
         }
-        #debugCanvas {
+        #video {
+            display: none;
+        }
+        #processedCanvas {
             position: fixed;
             top: 10px;
             right: 10px;
             width: 160px;
             height: 120px;
             border: 2px solid white;
-            z-index: 100;
-        }
-        #video {
-            position: fixed;
-            top: -9999px;
-            left: -9999px;
         }
     </style>
 </head>
 <body>
     <div id="controls">
-        <button id="startCamera">Start Camera</button>
-        <br><br>
-        Displacement: <input type="range" id="displacementScale" min="0" max="2" step="0.1" value="0.5">
-        <br>
-        Segments: <input type="range" id="segments" min="1" max="256" step="1" value="64">
+        <button id="startWebcam">Start Webcam</button><br><br>
+        <input type="file" id="imageInput" accept="image/*"><br><br>
+        Displacement: <input type="range" id="displacementScale" min="0" max="2" step="0.1" value="1"><br>
+        Segments: <input type="range" id="segments" min="1" max="256" step="1" value="128">
     </div>
     
-    <video id="video" autoplay playsinline></video>
-    <canvas id="debugCanvas"></canvas>
+    <video id="video" autoplay></video>
+    <canvas id="processedCanvas"></canvas>
 
     <script type="module">
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
         
-        // Setup debug canvas for processing
-        const debugCanvas = document.getElementById('debugCanvas');
-        const debugCtx = debugCanvas.getContext('2d');
-        debugCanvas.width = 256;
-        debugCanvas.height = 256;
-
-        // Setup video
+        let plane, material, videoTexture;
+        let isWebcamActive = false;
+        const processedCanvas = document.getElementById('processedCanvas');
+        const processedCtx = processedCanvas.getContext('2d');
         const video = document.getElementById('video');
-        let videoTexture;
-        let isVideoPlaying = false;
-
-        // Three.js setup
+        
+        // Scene setup
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Create material and plane
-        const material = new THREE.MeshPhongMaterial({
-            color: 0x808080,
-            displacementScale: 0.5,
-            side: THREE.DoubleSide,
-        });
+        // Default texture
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 256;
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, 256, 256);
+        const defaultTexture = new THREE.CanvasTexture(canvas);
 
-        let plane = new THREE.Mesh(
-            new THREE.PlaneGeometry(5, 5, 64, 64),
-            material
-        );
+        function createPlane(segments) {
+            const geometry = new THREE.PlaneGeometry(5, 5, segments, segments);
+            if (!material) {
+                material = new THREE.MeshStandardMaterial({
+                    color: 0x808080,
+                    displacementMap: defaultTexture,
+                    displacementScale: 1.0,
+                    side: THREE.DoubleSide,
+                    metalness: 0.2,
+                    roughness: 0.8
+                });
+            }
+            return new THREE.Mesh(geometry, material);
+        }
+
+        // Initial plane
+        plane = createPlane(128);
         scene.add(plane);
 
-        // Lighting
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(1, 1, 1);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0x404040));
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(5, 5, 5);
+        scene.add(pointLight);
 
         camera.position.z = 5;
 
-        // Camera button handler
-        document.getElementById('startCamera').addEventListener('click', async () => {
+        // Webcam setup
+        document.getElementById('startWebcam').addEventListener('click', async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { 
-                        width: 640,
-                        height: 480
-                    }
-                });
-                
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
-                await video.play();
+                video.play();
                 
-                // Create video texture once video is playing
-                videoTexture = new THREE.Texture(debugCanvas);
+                // Set processed canvas size
+                processedCanvas.width = 256;
+                processedCanvas.height = 256;
+                
+                // Create video texture
+                videoTexture = new THREE.CanvasTexture(processedCanvas);
                 material.displacementMap = videoTexture;
-                isVideoPlaying = true;
-                
-            } catch (error) {
-                console.error('Error accessing camera:', error);
-                alert('Unable to access camera. Please ensure you have a camera connected and have granted permission.');
+                isWebcamActive = true;
+            } catch (err) {
+                console.error('Error accessing webcam:', err);
             }
         });
 
-        // Process video to grayscale
-        function processVideo() {
-            if (!isVideoPlaying) return;
+        // Process video frame to grayscale
+        function processVideoFrame() {
+            if (!isWebcamActive || !video.videoWidth) return;
             
-            debugCtx.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
-            const imageData = debugCtx.getImageData(0, 0, debugCanvas.width, debugCanvas.height);
+            processedCtx.drawImage(video, 0, 0, processedCanvas.width, processedCanvas.height);
+            const imageData = processedCtx.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
             const data = imageData.data;
-
+            
+            // Convert to grayscale
             for (let i = 0; i < data.length; i += 4) {
-                const grayscale = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
-                data[i] = data[i + 1] = data[i + 2] = grayscale * 255;
+                const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                data[i] = data[i + 1] = data[i + 2] = gray;
             }
-
-            debugCtx.putImageData(imageData, 0, 0);
-            if (videoTexture) videoTexture.needsUpdate = true;
+            
+            processedCtx.putImageData(imageData, 0, 0);
+            if (videoTexture) {
+                videoTexture.needsUpdate = true;
+                material.displacementMap = videoTexture;
+                material.needsUpdate = true;
+            }
         }
 
-        // Controls
-        document.getElementById('displacementScale').addEventListener('input', (e) => {
+        // Handle image upload
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                isWebcamActive = false;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = new Image();
+                    img.onload = function() {
+                        const texture = new THREE.Texture(img);
+                        texture.needsUpdate = true;
+                        material.displacementMap = texture;
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Handle displacement scale
+        document.getElementById('displacementScale').addEventListener('input', function(e) {
             material.displacementScale = parseFloat(e.target.value);
         });
 
-        document.getElementById('segments').addEventListener('input', (e) => {
+        // Handle segments
+        document.getElementById('segments').addEventListener('input', function(e) {
             const segments = parseInt(e.target.value);
             scene.remove(plane);
-            plane = new THREE.Mesh(
-                new THREE.PlaneGeometry(5, 5, segments, segments),
-                material
-            );
+            plane = createPlane(segments);
             scene.add(plane);
         });
 
-        // Animation loop
+        // Animation
         function animate() {
             requestAnimationFrame(animate);
-            if (isVideoPlaying) {
-                processVideo();
-            }
-            plane.rotation.x = Math.PI / 4;
-            plane.rotation.y += 0.01;
+            if (isWebcamActive) processVideoFrame();
+            plane.rotation.x += 0.005;
+            plane.rotation.y += 0.005;
             renderer.render(scene, camera);
         }
 
-        // Handle window resize
+        // Handle resize
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
