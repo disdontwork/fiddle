@@ -14,7 +14,7 @@
             flex-direction: column;
             gap: 10px;
         }
-        #bwVideo {
+        #videoFeed {
             position: fixed;
             bottom: 10px;
             left: 10px;
@@ -26,114 +26,96 @@
     </style>
 </head>
 <body>
-    <video id="bwVideo" autoplay playsinline></video>
+    <video id="videoFeed" autoplay playsinline></video>
     <div class="controls">
-        <label>Contrast: <input type="range" id="contrast" min="0" max="2" step="0.1" value="1"></label>
-        <label>Fresnel Effect: <input type="range" id="fresnel" min="0" max="5" step="0.1" value="1"></label>
-        <button id="startWebcam">Start Webcam</button>
-        <button id="togglePointCloud">Toggle Point Cloud</button>
-        <input type="file" id="uploadImage" accept="image/*">
+        <button id="startTracking">Start Hand Tracking</button>
     </div>
 
     <script type="module">
         import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+        import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
+        import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
 
-        // Setup scene
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let oscRight = null;
+        let oscLeft = null;
 
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-        });
-
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-
-        // Create segmented plane
-        const geometry = new THREE.PlaneGeometry(30, 30, 256, 256);
-        const material = new THREE.ShaderMaterial({
-            uniforms: {
-                displacementMap: { value: new THREE.DataTexture() },
-                contrast: { value: 1.0 },
-                fresnel: { value: 1.0 }
-            },
-            vertexShader: `
-                uniform sampler2D displacementMap;
-                uniform float contrast;
-                varying vec2 vUv;
-                
-                void main() {
-                    vUv = uv;
-                    vec4 displacement = texture2D(displacementMap, uv);
-                    vec3 newPosition = position + normal * (displacement.r * contrast - 0.5) * 5.0;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform float fresnel;
-                varying vec2 vUv;
-                
-                void main() {
-                    float edgeEffect = pow(1.0 - vUv.y, fresnel);
-                    gl_FragColor = vec4(vec3(edgeEffect), 1.0);
-                }
-            `,
-            wireframe: false
-        });
-
-        const plane = new THREE.Mesh(geometry, material);
-        scene.add(plane);
-        camera.position.set(0, 0, 20);
-
-        let pointCloudActive = false;
-        let pointCloud;
-
-        function generatePointCloudFromDisplacement() {
-            if (!material.uniforms.displacementMap.value) return;
-
-            const texture = material.uniforms.displacementMap.value.image;
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = texture.width;
-            canvas.height = texture.height;
-            ctx.drawImage(texture, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-
-            const vertices = [];
-            for (let y = 0; y < 256; y++) {
-                for (let x = 0; x < 256; x++) {
-                    const i = (y * 256 + x) * 4;
-                    const gray = data[i] / 255.0;
-                    vertices.push(x / 256 * 30 - 15, y / 256 * 30 - 15, gray * 5);
-                }
+        function playNote(frequency) {
+            if (!oscRight) {
+                oscRight = audioContext.createOscillator();
+                oscRight.type = 'sine';
+                oscRight.connect(audioContext.destination);
+                oscRight.start();
             }
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05 });
-            pointCloud = new THREE.Points(geometry, material);
-            scene.add(pointCloud);
+            oscRight.frequency.value = frequency;
         }
 
-        document.getElementById('togglePointCloud').addEventListener('click', () => {
-            if (pointCloudActive) {
-                scene.remove(pointCloud);
-            } else {
-                generatePointCloudFromDisplacement();
+        function playChord(baseFrequency) {
+            if (!oscLeft) {
+                oscLeft = audioContext.createOscillator();
+                oscLeft.type = 'sawtooth';
+                oscLeft.connect(audioContext.destination);
+                oscLeft.start();
             }
-            pointCloudActive = !pointCloudActive;
-        });
+            oscLeft.frequency.value = baseFrequency * 1.5; // Harmonic chord
+        }
 
-        renderer.setAnimationLoop(() => {
-            renderer.render(scene, camera);
-        });
+        function stopSounds() {
+            if (oscRight) {
+                oscRight.stop();
+                oscRight = null;
+            }
+            if (oscLeft) {
+                oscLeft.stop();
+                oscLeft = null;
+            }
+        }
+
+        async function startHandTracking() {
+            const video = document.getElementById('videoFeed');
+            video.style.display = 'block';
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+            hands.setOptions({
+                maxNumHands: 2,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            
+            hands.onResults((results) => {
+                if (results.multiHandLandmarks.length === 0) {
+                    stopSounds();
+                    return;
+                }
+                
+                results.multiHandLandmarks.forEach((landmarks, index) => {
+                    const z = landmarks[9].z; // Depth of the palm center
+                    const isRightHand = results.multiHandedness[index].label === 'Right';
+                    
+                    if (isRightHand) {
+                        playNote(440 + z * -500); // Map right hand to frequency
+                    } else {
+                        playChord(220 + z * -500); // Map left hand to chords
+                    }
+                });
+            });
+            
+            const camera = new Camera(video, {
+                onFrame: async () => {
+                    await hands.send({ image: video });
+                },
+                width: 640,
+                height: 480
+            });
+            camera.start();
+        }
+
+        document.getElementById('startTracking').addEventListener('click', startHandTracking);
     </script>
 </body>
 </html>
