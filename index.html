@@ -21,6 +21,7 @@
             width: 160px;
             height: 120px;
             border: 2px solid white;
+            display: none;
         }
     </style>
 </head>
@@ -58,7 +59,7 @@
         const geometry = new THREE.PlaneGeometry(30, 30, 256, 256);
         const material = new THREE.ShaderMaterial({
             uniforms: {
-                displacementMap: { value: null },
+                displacementMap: { value: new THREE.DataTexture() },
                 contrast: { value: 1.0 },
                 fresnel: { value: 1.0 }
             },
@@ -94,58 +95,46 @@
         let pointCloudActive = false;
         let pointCloud;
 
-        function generatePointCloudFromDisplacement() {
-            if (!material.uniforms.displacementMap.value) return;
+        document.getElementById('startWebcam').onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('bwVideo');
+                video.srcObject = stream;
+                video.style.display = 'block';
+                await video.play();
+                
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                canvas.width = 256;
+                canvas.height = 256;
+                
+                function processFrame() {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const data = imageData.data;
 
-            const texture = material.uniforms.displacementMap.value.image;
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = texture.width;
-            canvas.height = texture.height;
-            ctx.drawImage(texture, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-
-            const vertices = [];
-            for (let y = 0; y < 256; y++) {
-                for (let x = 0; x < 256; x++) {
-                    const i = (y * 256 + x) * 4;
-                    const gray = data[i] / 255.0;
-                    vertices.push(x / 256 * 30 - 15, y / 256 * 30 - 15, gray * 5);
-                }
-            }
-
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            const material = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05 });
-            pointCloud = new THREE.Points(geometry, material);
-            scene.add(pointCloud);
-        }
-
-        document.getElementById('togglePointCloud').addEventListener('click', () => {
-            if (pointCloudActive) {
-                scene.remove(pointCloud);
-            } else {
-                generatePointCloudFromDisplacement();
-            }
-            pointCloudActive = !pointCloudActive;
-        });
-
-        document.getElementById('uploadImage').addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    material.uniforms.displacementMap.value = new THREE.Texture(img);
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        data[i] = data[i + 1] = data[i + 2] = gray;
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+                    
+                    material.uniforms.displacementMap.value = new THREE.CanvasTexture(canvas);
                     material.uniforms.displacementMap.value.needsUpdate = true;
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
+                }
+
+                function animate() {
+                    requestAnimationFrame(animate);
+                    processFrame();
+                    renderer.render(scene, camera);
+                }
+                
+                animate();
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+                alert('Webcam access denied or unavailable. Please enable permissions.');
+            }
+        };
 
         renderer.setAnimationLoop(() => {
             renderer.render(scene, camera);
