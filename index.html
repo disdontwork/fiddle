@@ -3,7 +3,6 @@
 <head>
     <style>
         body { margin: 0; }
-        #video { display: none; }
         #controls {
             position: fixed;
             top: 10px;
@@ -12,55 +11,94 @@
             padding: 10px;
             color: white;
         }
+        #debug {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 5px;
+        }
     </style>
 </head>
 <body>
-    <video id="video" autoplay playsinline></video>
     <div id="controls">
-        <button id="startWebcam">Start Webcam</button><br><br>
-        <input type="range" id="displacement" min="0" max="2" step="0.1" value="0.5">
+        <button id="togglePattern">Toggle Pattern/Video</button><br>
+        <input type="range" id="displacement" min="0" max="5" step="0.1" value="1">
     </div>
+    <div id="debug"></div>
 
     <script type="module">
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
 
+        const debug = document.getElementById('debug');
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const video = document.getElementById('video');
-        const geometry = new THREE.PlaneGeometry(5, 5, 64, 64);
+        // Create test pattern
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.height = 256;
+        
+        const gradient = ctx.createLinearGradient(0, 0, 256, 256);
+        gradient.addColorStop(0, 'white');
+        gradient.addColorStop(1, 'black');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 256, 256);
+
+        const patternTexture = new THREE.CanvasTexture(canvas);
+        
+        // Setup geometry and material
+        const geometry = new THREE.PlaneGeometry(5, 5, 128, 128);
         const material = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            metalness: 0.1,
-            roughness: 0.5,
-            side: THREE.DoubleSide
+            color: 0x808080,
+            displacementMap: patternTexture,
+            displacementScale: 1.0,
+            displacementBias: -0.5,
+            side: THREE.DoubleSide,
         });
 
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(1, 1, 1);
-        scene.add(light);
+        // Lighting
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 5, 5);
+        scene.add(directionalLight);
         scene.add(new THREE.AmbientLight(0x404040));
 
         camera.position.z = 5;
 
-        document.getElementById('startWebcam').onclick = async () => {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
-            await video.play();
-            
-            const videoTexture = new THREE.VideoTexture(video);
-            material.displacementMap = videoTexture;
-            material.displacementScale = 0.5;
+        // Video setup
+        let isVideo = false;
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+
+        document.getElementById('togglePattern').onclick = async () => {
+            isVideo = !isVideo;
+            if (isVideo && !video.srcObject) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    await video.play();
+                    material.displacementMap = new THREE.VideoTexture(video);
+                    debug.textContent = 'Using video texture';
+                } catch (err) {
+                    console.error(err);
+                    debug.textContent = 'Video error: ' + err.message;
+                }
+            } else {
+                material.displacementMap = patternTexture;
+                debug.textContent = 'Using pattern texture';
+            }
         };
 
         document.getElementById('displacement').oninput = (e) => {
-            material.displacementScale = e.target.value;
+            material.displacementScale = parseFloat(e.target.value);
+            debug.textContent = `Scale: ${material.displacementScale}`;
         };
 
         function animate() {
@@ -68,6 +106,7 @@
             if (material.displacementMap) {
                 material.displacementMap.needsUpdate = true;
             }
+            plane.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
 
