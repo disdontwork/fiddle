@@ -1,121 +1,200 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial, sans-serif; }
-        .controls {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            color: white;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+import React, { useEffect, useRef, useState } from 'react';
+import { Camera } from 'lucide-react';
+
+// Base note frequencies for our scale
+const NOTE_FREQUENCIES = {
+  'C4': 261.63,
+  'E4': 329.63,
+  'G4': 392.00,
+  'C5': 523.25
+};
+
+const HandTheremin = () => {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const oscillatorRef = useRef(null);
+  const chordOscillatorsRef = useRef([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    let handDetector;
+    
+    const initializeCamera = async () => {
+      try {
+        // Initialize webcam
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 640, height: 480 } 
+        });
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
         }
-        #videoFeed {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            width: 160px;
-            height: 120px;
-            border: 2px solid white;
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <video id="videoFeed" autoplay playsinline></video>
-    <div class="controls">
-        <button id="startTracking">Start Hand Tracking</button>
+
+        // Initialize audio context
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Create main oscillator
+        oscillatorRef.current = audioContextRef.current.createOscillator();
+        const gainNode = audioContextRef.current.createGain();
+        gainNode.gain.value = 0;
+        oscillatorRef.current.connect(gainNode);
+        gainNode.connect(audioContextRef.current.destination);
+        oscillatorRef.current.start();
+
+        // Create chord oscillators
+        const frequencies = Object.values(NOTE_FREQUENCIES);
+        chordOscillatorsRef.current = frequencies.map(freq => {
+          const osc = audioContextRef.current.createOscillator();
+          const gain = audioContextRef.current.createGain();
+          gain.gain.value = 0;
+          osc.frequency.value = freq;
+          osc.connect(gain);
+          gain.connect(audioContextRef.current.destination);
+          osc.start();
+          return { oscillator: osc, gain };
+        });
+
+        // Load hand detection model
+        const { MediaPipeHandsMediaPipe } = await import('@mediapipe/hands');
+        const hands = new MediaPipeHandsMediaPipe({
+          locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+          }
+        });
+
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(handleResults);
+
+        // Start detection loop
+        const detectHands = async () => {
+          if (videoRef.current) {
+            await hands.send({ image: videoRef.current });
+          }
+          requestAnimationFrame(detectHands);
+        };
+
+        detectHands();
+      } catch (error) {
+        console.error('Error initializing:', error);
+      }
+    };
+
+    const handleResults = (results) => {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw video frame
+      if (videoRef.current) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      }
+
+      if (results.multiHandLandmarks) {
+        results.multiHandLandmarks.forEach((landmarks, index) => {
+          // Draw hand landmarks
+          landmarks.forEach(landmark => {
+            ctx.beginPath();
+            ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = index === 0 ? '#FF0000' : '#00FF00';
+            ctx.fill();
+          });
+
+          // Calculate z-position (depth) from wrist landmark
+          const depth = landmarks[0].z;
+          
+          if (index === 0) { // Right hand controls main note
+            const frequency = mapDepthToFrequency(depth);
+            if (oscillatorRef.current) {
+              oscillatorRef.current.frequency.setValueAtTime(
+                frequency, 
+                audioContextRef.current.currentTime
+              );
+            }
+          } else { // Left hand controls chord volume
+            const volume = mapDepthToVolume(depth);
+            chordOscillatorsRef.current.forEach(({ gain }) => {
+              gain.gain.setValueAtTime(
+                volume, 
+                audioContextRef.current.currentTime
+              );
+            });
+          }
+        });
+      }
+    };
+
+    const mapDepthToFrequency = (depth) => {
+      // Map depth (typically -1 to 1) to frequency range
+      const minFreq = 220; // A3
+      const maxFreq = 880; // A5
+      return minFreq + (1 - (depth + 1) / 2) * (maxFreq - minFreq);
+    };
+
+    const mapDepthToVolume = (depth) => {
+      // Map depth to volume (0 to 0.5)
+      return Math.max(0, 0.5 - (depth + 1) / 2);
+    };
+
+    if (isPlaying) {
+      initializeCamera();
+    }
+
+    return () => {
+      if (videoRef.current?.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, [isPlaying]);
+
+  const togglePlaying = () => {
+    setIsPlaying(!isPlaying);
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4 p-4">
+      <button 
+        onClick={togglePlaying}
+        className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+      >
+        <Camera size={24} />
+        {isPlaying ? 'Stop' : 'Start'} Theremin
+      </button>
+      
+      {isPlaying && (
+        <div className="relative w-full max-w-2xl">
+          <video
+            ref={videoRef}
+            className="hidden"
+            autoPlay
+            playsInline
+          />
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
+            className="w-full border rounded"
+          />
+          <div className="mt-4 text-center text-sm text-gray-600">
+            Move your right hand closer/further to control pitch
+            <br />
+            Move your left hand closer/further to control chord volume
+          </div>
+        </div>
+      )}
     </div>
+  );
+};
 
-    <script type="module">
-        import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
-        import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
-        import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
-
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        let oscRight = null;
-        let oscLeft = null;
-
-        function playNote(frequency) {
-            if (!oscRight) {
-                oscRight = audioContext.createOscillator();
-                oscRight.type = 'sine';
-                oscRight.connect(audioContext.destination);
-                oscRight.start();
-            }
-            oscRight.frequency.value = frequency;
-        }
-
-        function playChord(baseFrequency) {
-            if (!oscLeft) {
-                oscLeft = audioContext.createOscillator();
-                oscLeft.type = 'sawtooth';
-                oscLeft.connect(audioContext.destination);
-                oscLeft.start();
-            }
-            oscLeft.frequency.value = baseFrequency * 1.5; // Harmonic chord
-        }
-
-        function stopSounds() {
-            if (oscRight) {
-                oscRight.stop();
-                oscRight = null;
-            }
-            if (oscLeft) {
-                oscLeft.stop();
-                oscLeft = null;
-            }
-        }
-
-        async function startHandTracking() {
-            const video = document.getElementById('videoFeed');
-            video.style.display = 'block';
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
-            
-            const hands = new Hands({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-            });
-            hands.setOptions({
-                maxNumHands: 2,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
-            
-            hands.onResults((results) => {
-                if (results.multiHandLandmarks.length === 0) {
-                    stopSounds();
-                    return;
-                }
-                
-                results.multiHandLandmarks.forEach((landmarks, index) => {
-                    const z = landmarks[9].z; // Depth of the palm center
-                    const isRightHand = results.multiHandedness[index].label === 'Right';
-                    
-                    if (isRightHand) {
-                        playNote(440 + z * -500); // Map right hand to frequency
-                    } else {
-                        playChord(220 + z * -500); // Map left hand to chords
-                    }
-                });
-            });
-            
-            const camera = new Camera(video, {
-                onFrame: async () => {
-                    await hands.send({ image: video });
-                },
-                width: 640,
-                height: 480
-            });
-            camera.start();
-        }
-
-        document.getElementById('startTracking').addEventListener('click', startHandTracking);
-    </script>
-</body>
-</html>
+export default HandTheremin;
