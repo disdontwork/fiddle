@@ -1,155 +1,168 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { margin: 0; overflow: hidden; background: black; color: white; font-family: Arial, sans-serif; }
-        .controls {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            padding: 10px;
-            color: white;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-        video {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            width: 200px;
-            height: 150px;
-            border: 2px solid white;
-        }
-    </style>
-</head>
-<body>
-    <video id="videoFeed" autoplay playsinline></video>
-    <canvas id="overlayCanvas"></canvas>
-    <div class="controls">
-        <button id="startTracking">Start Hand Tracking</button>
-        <label>Wave Type: 
-            <select id="waveType">
-                <option value="sine">Sine</option>
-                <option value="square">Square</option>
-                <option value="sawtooth">Sawtooth</option>
-                <option value="triangle">Triangle</option>
-            </select>
-        </label>
+import React, { useEffect, useRef, useState } from 'react';
+import { Camera } from 'lucide-react';
+
+const NOTE_FREQUENCIES = {
+  'C4': 261.63, 'E4': 329.63, 'G4': 392.00, 'C5': 523.25
+};
+
+const HandTheremin = () => {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const oscillatorRef = useRef(null);
+  const chordOscillatorsRef = useRef([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    if (isPlaying) {
+      initializeAudioAndCamera();
+    }
+    return () => cleanup();
+  }, [isPlaying]);
+
+  const initializeAudioAndCamera = async () => {
+    try {
+      // Initialize audio
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      setupOscillators();
+
+      // Initialize camera
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 }
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        detectMotion();
+      }
+    } catch (error) {
+      console.error('Initialization error:', error);
+    }
+  };
+
+  const setupOscillators = () => {
+    // Main oscillator
+    oscillatorRef.current = audioContextRef.current.createOscillator();
+    const gainNode = audioContextRef.current.createGain();
+    gainNode.gain.value = 0;
+    oscillatorRef.current.connect(gainNode);
+    gainNode.connect(audioContextRef.current.destination);
+    oscillatorRef.current.start();
+
+    // Chord oscillators
+    chordOscillatorsRef.current = Object.values(NOTE_FREQUENCIES).map(freq => {
+      const osc = audioContextRef.current.createOscillator();
+      const gain = audioContextRef.current.createGain();
+      gain.gain.value = 0;
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(audioContextRef.current.destination);
+      osc.start();
+      return { oscillator: osc, gain };
+    });
+  };
+
+  const detectMotion = () => {
+    if (!videoRef.current || !canvasRef.current || !isPlaying) return;
+
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+    
+    const imageData = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+    const motion = calculateMotion(imageData);
+    
+    // Map motion to audio parameters
+    updateAudio(motion.left, motion.right);
+    
+    requestAnimationFrame(detectMotion);
+  };
+
+  const calculateMotion = (imageData) => {
+    const width = imageData.width;
+    const midpoint = Math.floor(width / 2);
+    const data = imageData.data;
+    
+    let leftTotal = 0;
+    let rightTotal = 0;
+    
+    // Simple brightness calculation for left and right sides
+    for (let i = 0; i < data.length; i += 4) {
+      const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      const x = (i / 4) % width;
+      
+      if (x < midpoint) {
+        leftTotal += brightness;
+      } else {
+        rightTotal += brightness;
+      }
+    }
+    
+    return {
+      left: leftTotal / (width * imageData.height / 2),
+      right: rightTotal / (width * imageData.height / 2)
+    };
+  };
+
+  const updateAudio = (leftMotion, rightMotion) => {
+    // Update main oscillator frequency based on right hand
+    const frequency = 220 + rightMotion;
+    oscillatorRef.current.frequency.setValueAtTime(
+      frequency,
+      audioContextRef.current.currentTime
+    );
+
+    // Update chord volume based on left hand
+    const volume = Math.min(leftMotion / 255, 0.5);
+    chordOscillatorsRef.current.forEach(({ gain }) => {
+      gain.gain.setValueAtTime(
+        volume,
+        audioContextRef.current.currentTime
+      );
+    });
+  };
+
+  const cleanup = () => {
+    if (videoRef.current?.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-4 p-4">
+      <button 
+        onClick={() => setIsPlaying(!isPlaying)}
+        className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+      >
+        <Camera size={24} />
+        {isPlaying ? 'Stop' : 'Start'} Theremin
+      </button>
+      
+      {isPlaying && (
+        <div className="relative w-full max-w-2xl">
+          <video
+            ref={videoRef}
+            className="hidden"
+            autoPlay
+            playsInline
+          />
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
+            className="w-full border rounded"
+          />
+          <div className="mt-4 text-center text-sm text-gray-600">
+            Move your hands to control the sound:
+            <br />
+            Right side → pitch, Left side → chord volume
+          </div>
+        </div>
+      )}
     </div>
+  );
+};
 
-    <script type="module">
-        import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
-        import { Hands } from 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js';
-        import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
-
-        const video = document.getElementById('videoFeed');
-        const canvas = document.getElementById('overlayCanvas');
-        const ctx = canvas.getContext('2d');
-
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        let oscRight, oscLeft, gainRight, gainLeft;
-        let waveType = 'sine';
-
-        document.getElementById('waveType').addEventListener('change', (e) => {
-            waveType = e.target.value;
-        });
-
-        async function startHandTracking() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
-            
-            const hands = new Hands({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-            });
-            hands.setOptions({
-                maxNumHands: 2,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.5,
-                minTrackingConfidence: 0.5
-            });
-            
-            hands.onResults((results) => {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-                    stopSounds();
-                    return;
-                }
-                
-                results.multiHandLandmarks.forEach((landmarks, index) => {
-                    const x = landmarks[9].x * canvas.width;
-                    const y = landmarks[9].y * canvas.height;
-                    const z = landmarks[9].z; 
-                    const isRightHand = results.multiHandedness[index].label === 'Right';
-                    ctx.fillStyle = isRightHand ? 'blue' : 'red';
-                    ctx.beginPath();
-                    ctx.arc(x, y, 10, 0, Math.PI * 2);
-                    ctx.fill();
-                    
-                    if (isRightHand) {
-                        playNote(440 + z * -500, Math.abs(z));
-                    } else {
-                        playChord(220 + z * -500, Math.abs(z));
-                    }
-                });
-            });
-            
-            const camera = new Camera(video, {
-                onFrame: async () => {
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    await hands.send({ image: video });
-                },
-                width: 640,
-                height: 480
-            });
-            camera.start();
-        }
-
-        function playNote(frequency, volume) {
-            if (!oscRight) {
-                oscRight = audioContext.createOscillator();
-                gainRight = audioContext.createGain();
-                oscRight.type = waveType;
-                oscRight.connect(gainRight);
-                gainRight.connect(audioContext.destination);
-                oscRight.start();
-            }
-            oscRight.frequency.value = frequency;
-            gainRight.gain.value = volume;
-        }
-
-        function playChord(baseFrequency, volume) {
-            if (!oscLeft) {
-                oscLeft = audioContext.createOscillator();
-                gainLeft = audioContext.createGain();
-                oscLeft.type = waveType;
-                oscLeft.connect(gainLeft);
-                gainLeft.connect(audioContext.destination);
-                oscLeft.start();
-            }
-            oscLeft.frequency.value = baseFrequency * 1.5;
-            gainLeft.gain.value = volume;
-        }
-
-        function stopSounds() {
-            if (oscRight) {
-                oscRight.stop();
-                oscRight = null;
-            }
-            if (oscLeft) {
-                oscLeft.stop();
-                oscLeft = null;
-            }
-        }
-
-        document.getElementById('startTracking').addEventListener('click', startHandTracking);
-    </script>
-</body>
-</html>
+export default HandTheremin;
