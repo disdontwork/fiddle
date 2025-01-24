@@ -11,25 +11,16 @@
             padding: 10px;
             color: white;
         }
-        #videoPreview {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            width: 160px;
-            height: 120px;
-            border: 2px solid white;
-        }
     </style>
 </head>
 <body>
-    <video id="videoPreview" autoplay playsinline></video>
     <div class="controls">
         <label>Displacement: <input type="range" id="scale" min="0" max="2" step="0.1" value="1"></label>
         <button id="webcam">Start Webcam</button>
     </div>
 
     <script type="module">
-        import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r159/three.module.js';
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -37,6 +28,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
+        // Test pattern
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         canvas.width = canvas.height = 256;
@@ -71,7 +63,7 @@
 
         document.getElementById('webcam').onclick = async () => {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            const video = document.getElementById('videoPreview');
+            const video = document.createElement('video');
             video.srcObject = stream;
             await video.play();
             material.displacementMap = new THREE.VideoTexture(video);
@@ -79,6 +71,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            plane.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
 
