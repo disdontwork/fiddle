@@ -11,63 +11,98 @@
             padding: 10px;
             color: white;
         }
+        #bwVideo {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid white;
+        }
+        #processedCanvas {
+            position: fixed;
+            bottom: 10px;
+            left: 180px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid white;
+        }
     </style>
 </head>
 <body>
+    <video id="bwVideo" autoplay playsinline></video>
+    <canvas id="processedCanvas"></canvas>
     <div class="controls">
         <label>Displacement: <input type="range" id="scale" min="0" max="2" step="0.1" value="1"></label>
         <button id="webcam">Start Webcam</button>
     </div>
+
     <script type="module">
-         import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+        import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer();
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = canvas.height = 256;
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, 128, 256);
-        ctx.fillStyle = 'black';
-        ctx.fillRect(128, 0, 128, 256);
-        
-        const testTexture = new THREE.CanvasTexture(canvas);
-        const geometry = new THREE.PlaneGeometry(5, 5, 512, 512); // Increased segments
+        const processedCanvas = document.getElementById('processedCanvas');
+        const ctx = processedCanvas.getContext('2d');
+        processedCanvas.width = 512;
+        processedCanvas.height = 512;
+
+        const geometry = new THREE.PlaneGeometry(5, 5, 512, 512);
         const material = new THREE.MeshPhongMaterial({
             color: 0x808080,
-            displacementMap: testTexture,
             displacementScale: 1.0,
             side: THREE.DoubleSide
         });
+
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
+
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(1, 1, 1);
         scene.add(light);
         scene.add(new THREE.AmbientLight(0x404040));
+
         camera.position.z = 5;
-        
+
         document.getElementById('scale').oninput = (e) => {
             material.displacementScale = Number(e.target.value);
         };
-        
+
         document.getElementById('webcam').onclick = async () => {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            const video = document.createElement('video');
+            const video = document.getElementById('bwVideo');
             video.srcObject = stream;
             await video.play();
-            material.displacementMap = new THREE.VideoTexture(video);
+
+            function processFrame() {
+                ctx.drawImage(video, 0, 0, processedCanvas.width, processedCanvas.height);
+                const imageData = ctx.getImageData(0, 0, processedCanvas.width, processedCanvas.height);
+                const data = imageData.data;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    data[i] = data[i + 1] = data[i + 2] = gray;
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                if (!material.displacementMap) {
+                    material.displacementMap = new THREE.CanvasTexture(processedCanvas);
+                }
+                material.displacementMap.needsUpdate = true;
+            }
+
+            function animate() {
+                requestAnimationFrame(animate);
+                processFrame();
+                renderer.render(scene, camera);
+            }
+
+            animate();
         };
-        
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
-        }
-        
-        animate();
     </script>
 </body>
 </html>
