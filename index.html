@@ -1,10 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Realtime Webcam Displacement</title>
     <style>
         body { margin: 0; }
-        canvas { display: block; }
+        #video { display: none; }
         #controls {
             position: fixed;
             top: 10px;
@@ -12,59 +11,37 @@
             background: rgba(0,0,0,0.7);
             padding: 10px;
             color: white;
-            font-family: Arial;
-        }
-        #debugCanvas {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            width: 160px;
-            height: 120px;
-            border: 2px solid white;
-        }
-        #video {
-            display: none;
         }
     </style>
 </head>
 <body>
     <video id="video" autoplay playsinline></video>
-    <canvas id="debugCanvas"></canvas>
-    
     <div id="controls">
         <button id="startWebcam">Start Webcam</button><br><br>
-        Displacement: <input type="range" id="displacementScale" min="0" max="3" step="0.1" value="1">
+        <input type="range" id="displacement" min="0" max="2" step="0.1" value="0.5">
     </div>
 
     <script type="module">
         import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
 
-        // Setup debug canvas
-        const debugCanvas = document.getElementById('debugCanvas');
-        const debugCtx = debugCanvas.getContext('2d');
-        debugCanvas.width = 256;
-        debugCanvas.height = 256;
-
-        // Scene setup
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer();
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        // Create plane
-        const geometry = new THREE.PlaneGeometry(5, 5, 128, 128);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0x808080,
-            displacementScale: 1.0,
-            displacementBias: 0,
-            side: THREE.DoubleSide,
+        const video = document.getElementById('video');
+        const geometry = new THREE.PlaneGeometry(5, 5, 64, 64);
+        const material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            metalness: 0.1,
+            roughness: 0.5,
+            side: THREE.DoubleSide
         });
 
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
 
-        // Lighting
         const light = new THREE.DirectionalLight(0xffffff, 1);
         light.position.set(1, 1, 1);
         scene.add(light);
@@ -72,84 +49,29 @@
 
         camera.position.z = 5;
 
-        // Video setup
-        const video = document.getElementById('video');
-        let videoTexture;
-
         document.getElementById('startWebcam').onclick = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: 256,
-                        height: 256 
-                    } 
-                });
-                video.srcObject = stream;
-                await video.play();
-
-                // Create video texture
-                videoTexture = new THREE.VideoTexture(video);
-                videoTexture.minFilter = THREE.LinearFilter;
-                videoTexture.magFilter = THREE.LinearFilter;
-                
-                // Process video to grayscale
-                processVideo();
-            } catch (err) {
-                console.error('Error:', err);
-            }
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+            
+            const videoTexture = new THREE.VideoTexture(video);
+            material.displacementMap = videoTexture;
+            material.displacementScale = 0.5;
         };
 
-        function processVideo() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Draw video frame to debug canvas
-                debugCtx.drawImage(video, 0, 0, debugCanvas.width, debugCanvas.height);
-                
-                // Get pixel data
-                const imageData = debugCtx.getImageData(0, 0, debugCanvas.width, debugCanvas.height);
-                const data = imageData.data;
+        document.getElementById('displacement').oninput = (e) => {
+            material.displacementScale = e.target.value;
+        };
 
-                // Convert to grayscale
-                for (let i = 0; i < data.length; i += 4) {
-                    const gray = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    data[i] = data[i + 1] = data[i + 2] = gray;
-                }
-
-                // Put processed data back
-                debugCtx.putImageData(imageData, 0, 0);
-
-                // Update displacement map
-                material.displacementMap = new THREE.CanvasTexture(debugCanvas);
-                material.displacementMap.needsUpdate = true;
-            }
-        }
-
-        // Handle displacement scale
-        document.getElementById('displacementScale').addEventListener('input', (e) => {
-            material.displacementScale = parseFloat(e.target.value);
-        });
-
-        // Animation loop
         function animate() {
             requestAnimationFrame(animate);
-            
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                processVideo();
+            if (material.displacementMap) {
+                material.displacementMap.needsUpdate = true;
             }
-
-            plane.rotation.x += 0.005;
-            plane.rotation.y += 0.005;
-            
             renderer.render(scene, camera);
         }
 
         animate();
-
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
     </script>
 </body>
 </html>
