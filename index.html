@@ -3,6 +3,17 @@
 <head>
     <style>
         body { margin: 0; }
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
         #bwVideo {
             position: fixed;
             bottom: 10px;
@@ -14,6 +25,12 @@
     </style>
 </head>
 <body>
+    <div class="controls">
+        <label>Segments: <input type="range" id="segments" min="32" max="512" step="32" value="512"></label>
+        <label>Fresnel Bias: <input type="range" id="fresnelBias" min="0" max="1" step="0.1" value="0.1"></label>
+        <label>Fresnel Scale: <input type="range" id="fresnelScale" min="0" max="5" step="0.1" value="1.0"></label>
+        <label>Fresnel Power: <input type="range" id="fresnelPower" min="0" max="5" step="0.1" value="2.0"></label>
+    </div>
     <video id="bwVideo" autoplay playsinline></video>
     <script type="module">
         import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
@@ -107,7 +124,24 @@
             animate();
         }
 
-        init();
+        // Event listeners for controls
+        document.getElementById('segments').addEventListener('input', (e) => {
+            const segments = parseInt(e.target.value);
+            geometry.dispose();
+            plane.geometry = new THREE.PlaneGeometry(30, 30, segments, segments);
+        });
+
+        document.getElementById('fresnelBias').addEventListener('input', (e) => {
+            material.uniforms.fresnelBias.value = parseFloat(e.target.value);
+        });
+
+        document.getElementById('fresnelScale').addEventListener('input', (e) => {
+            material.uniforms.fresnelScale.value = parseFloat(e.target.value);
+        });
+
+        document.getElementById('fresnelPower').addEventListener('input', (e) => {
+            material.uniforms.fresnelPower.value = parseFloat(e.target.value);
+        });
     </script>
 </body>
 </html>
