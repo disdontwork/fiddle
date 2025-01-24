@@ -51,12 +51,20 @@
         const plane = new THREE.Mesh(geometry, material);
         scene.add(plane);
 
-        const light = new THREE.DirectionalLight(0xffffff, 1);
-        light.position.set(1, 1, 5);
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0x404040));
+        const mainLight = new THREE.DirectionalLight(0xffffff, 1);
+        mainLight.position.set(0, 0, 5);
+        scene.add(mainLight);
+        scene.add(new THREE.AmbientLight(0x404040, 0.5));
 
-        camera.position.z = 10;
+        camera.position.z = 15;
+        
+        document.getElementById('lightIntensity').oninput = (e) => {
+            mainLight.intensity = Number(e.target.value);
+        };
+
+        document.getElementById('lightZ').oninput = (e) => {
+            mainLight.position.z = Number(e.target.value);
+        };
 
         document.getElementById('scale').oninput = (e) => {
             material.displacementScale = Number(e.target.value);
