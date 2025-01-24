@@ -53,7 +53,7 @@
         document.body.appendChild(renderer.domElement);
 
         // Create plane
-        const geometry = new THREE.PlaneGeometry(5, 5, 128, 128);
+        const geometry = new THREE.PlaneGeometry(16, 9, 128, 128);
         const material = new THREE.MeshPhongMaterial({
             color: 0x808080,
             displacementScale: 1.0,
@@ -136,8 +136,7 @@
                 processVideo();
             }
 
-            plane.rotation.x += 0.005;
-            plane.rotation.y += 0.005;
+            // Removed rotation
             
             renderer.render(scene, camera);
         }
