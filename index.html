@@ -136,8 +136,8 @@
                 processVideo();
             }
 
-            // Plane remains flat
-            // plane.rotation.z += 0.002;
+            plane.rotation.x += 0.005;
+            plane.rotation.y += 0.005;
             
             renderer.render(scene, camera);
         }
